@@ -47,7 +47,7 @@ struct NumbersParser: ParsableCommand {
         commandName: "numbers-parser",
         abstract: "Parse contents of a numbers file",
         version: "1.0.0",
-        subcommands: [Export.self, Extract.self, Parse.self, Invoice.self],  
+        subcommands: [Export.self, Extract.self, Parse.self, Invoice.self, Read.self],
         defaultSubcommand: Parse.self
     )
 }
@@ -353,7 +353,7 @@ struct Extract: ParsableCommand {
         }
 
         let lines = fileContents.components(separatedBy: "\n").filter { !$0.isEmpty }
-        guard let headers = lines.first?.components(separatedBy: ",") else {
+        guard let headers = lines.first?.components(separatedBy: ";") else {
             print("No headers found in \(filePath)")
             return nil
         }
@@ -361,7 +361,7 @@ struct Extract: ParsableCommand {
         var rows: [[String: String]] = []
 
         for line in lines.dropFirst() {
-            let values = line.components(separatedBy: ",")
+            let values = line.components(separatedBy: ";")
             var rowDict: [String: String] = [:]
 
             for (index, value) in values.enumerated() where index < headers.count {
@@ -373,9 +373,8 @@ struct Extract: ParsableCommand {
 
         return rows
     }
-
-    // processing csv into key:value pairs properly
-    func reparseJSON(filePath: String) -> [String: [[String: [String: String]]]]? {
+    
+    func reparseJSON(filePath: String) -> [String: [String: String]]? {
         guard let jsonData = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else {
             print("Failed to read JSON file: \(filePath)")
             return nil
@@ -386,31 +385,62 @@ struct Extract: ParsableCommand {
             return nil
         }
 
-        var invoiceData: [String: [[String: [String: String]]]] = ["Invoices": []]
-        var orderedInvoices: [[String: [String: String]]] = []
+        var invoiceData: [String: String] = [:]
 
-        for (_ , entry) in rawJson.enumerated() {
-            for (leftColumn, rightColumn) in entry {
-                let keyValue = rightColumn.components(separatedBy: ";").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-                if keyValue.count == 2, !keyValue[0].isEmpty, !keyValue[1].isEmpty {
-                    let invoiceID = leftColumn.components(separatedBy: ";").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown"
-
-                    let key = keyValue[0]
-                    let value = keyValue[1]
-
-                    if let index = orderedInvoices.firstIndex(where: { $0[invoiceID] != nil }) {
-                        orderedInvoices[index][invoiceID]?[key] = value
-                    } else {
-                        orderedInvoices.append([invoiceID: [key: value]])
-                    }
-                }
+        for entry in rawJson {
+            guard let keyColumn = entry["Invoice ID"],
+                  let valueColumn = entry.first(where: { $0.key.hasPrefix("RN") })?.value
+            else {
+                continue
             }
+
+            let cleanedKey = keyColumn.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanedValue = valueColumn.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Directly store key-value pairs without nesting inside another dictionary
+            invoiceData[cleanedKey] = cleanedValue
         }
 
-        invoiceData["Invoices"] = orderedInvoices
-        return invoiceData
+        return ["Invoices": invoiceData]
     }
+
+    // processing csv into key:value pairs properly
+    // func reparseJSON(filePath: String) -> [String: [[String: [String: String]]]]? {
+    //     guard let jsonData = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else {
+    //         print("Failed to read JSON file: \(filePath)")
+    //         return nil
+    //     }
+
+    //     guard let rawJson = try? JSONSerialization.jsonObject(with: jsonData, options: []) as? [[String: String]] else {
+    //         print("Failed to decode JSON structure in \(filePath)")
+    //         return nil
+    //     }
+
+    //     var invoiceData: [String: [[String: [String: String]]]] = ["Invoices": []]
+    //     var orderedInvoices: [[String: [String: String]]] = []
+
+    //     for (_ , entry) in rawJson.enumerated() {
+    //         for (leftColumn, rightColumn) in entry {
+    //             let keyValue = rightColumn.components(separatedBy: ";").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    //             if keyValue.count == 2, !keyValue[0].isEmpty, !keyValue[1].isEmpty {
+    //                 let invoiceID = leftColumn.components(separatedBy: ";").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown"
+
+    //                 let key = keyValue[0]
+    //                 let value = keyValue[1]
+
+    //                 if let index = orderedInvoices.firstIndex(where: { $0[invoiceID] != nil }) {
+    //                     orderedInvoices[index][invoiceID]?[key] = value
+    //                 } else {
+    //                     orderedInvoices.append([invoiceID: [key: value]])
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     invoiceData["Invoices"] = orderedInvoices
+    //     return invoiceData
+    // }
 
     func saveJSON(data: [[String: String]], to filePath: String) {
         let fileURL = URL(fileURLWithPath: filePath)
@@ -423,7 +453,7 @@ struct Extract: ParsableCommand {
         }
     }
 
-    func saveReparsedJSON(data: [String: [[String: Any]]], to filePath: String) {
+    func saveReparsedJSON(data: [String: [String: Any]], to filePath: String) {
         let fileURL = URL(fileURLWithPath: filePath)
 
         do {
@@ -550,5 +580,42 @@ struct Parse: ParsableCommand {
         }
     }
 }
+
+struct Read: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "read",
+        abstract: "Read last parsed values from JSON"
+    )
+
+    func run() {
+        do {
+            let json = environment(Environment.reparsed.rawValue)
+
+            let jsonData = try Data(contentsOf: URL(fileURLWithPath: json))
+            let jsonObject = try JSONSerialization.jsonObject(with: jsonData, options: [])
+
+            if let jsonString = String(data: try JSONSerialization.data(withJSONObject: jsonObject, options: .prettyPrinted), encoding: .utf8) {
+                print(jsonString)
+            } else {
+                print("Failed to convert JSON to string.")
+            }
+        } catch {
+            print("Error reading JSON file: \(error)")
+        }
+    }
+}
+
+// struct Init: ParsableCommand {
+//     static let configuration = CommandConfiguration(
+//         commandName: "init",
+//         abstract: "Initialization helper"
+//     )
+
+//     func run() {
+//         do {
+//         } catch {
+//         }
+//     }
+// }
 
 NumbersParser.main()

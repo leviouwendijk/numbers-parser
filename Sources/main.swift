@@ -25,6 +25,7 @@ enum Script {
     case exportCSV
     case exportPDF
     case close
+    case ghostty
 }
 
 struct NumbersData {
@@ -228,6 +229,12 @@ struct Export: ParsableCommand {
                     end tell
                 end tell
                 """
+            case .ghostty:
+                return """
+                tell application "Ghostty"
+                    activate
+                end tell
+                """
             case .close:
                 return """
                 tell application "Numbers"
@@ -280,6 +287,7 @@ struct Export: ParsableCommand {
         let csv = script(.exportCSV, args)
         let pdf = script(.exportPDF, args)
         let closeOp = script(.close, args)
+        let ghostty = script(.ghostty, args)
 
         runOsascriptProcess(open)
         if adjust {
@@ -304,6 +312,7 @@ struct Export: ParsableCommand {
         removeExistingCSV()
         runOsascriptProcess(csv)
         runOsascriptProcess(pdf)
+        runOsascriptProcess(ghostty)
         if close {
             runOsascriptProcess(closeOp)
         }

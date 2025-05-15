@@ -1,13 +1,22 @@
 {
-  "originHash" : "1661b4f4939c3e1ae1a4fc4b64325cfefa9ce775eb44b4ac3f3ebe35f438e86b",
+  "originHash" : "3d51b60eb990ffcba739b1d3d76f7f3bc240a08ed5907cd1e0baf17b2f06fa16",
   "pins" : [
+    {
+      "identity" : "macactor",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/leviouwendijk/MacActor.git",
+      "state" : {
+        "revision" : "2dce4d644c14814a5e1c86e61c53a47fe2426bef",
+        "version" : "0.1.11"
+      }
+    },
     {
       "identity" : "plate",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/leviouwendijk/plate.git",
       "state" : {
-        "revision" : "4fcd849a07c69132ea57b376f5eacd039f810b59",
-        "version" : "1.2.2"
+        "revision" : "dace53658e9a3ff7dae078fdb3e2400f138dfb32",
+        "version" : "1.4.8"
       }
     },
     {

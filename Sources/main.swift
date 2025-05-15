@@ -2,6 +2,7 @@ import Foundation
 import ArgumentParser
 import plate
 import PDFKit
+import MacActor
 
 enum Environment: String {
     case source = "NUMBERS_SOURCE"
@@ -15,6 +16,7 @@ enum Environment: String {
     case table = "NUMBERS_TABLE"
     case row = "NUMBERS_ROW"
     case column = "NUMBERS_COLUMN"
+    case contacts = "NUMBERS_CONTACTS"
 }
 
 enum Script {
@@ -26,6 +28,8 @@ enum Script {
     case exportPDF
     case close
     case ghostty
+    case responder
+    case map
 }
 
 struct NumbersData {
@@ -48,9 +52,211 @@ struct NumbersParser: ParsableCommand {
         commandName: "numbers-parser",
         abstract: "Parse contents of a numbers file",
         version: "1.0.0",
-        subcommands: [Export.self, Extract.self, Parse.self, Invoice.self, Read.self],
+        subcommands: [Export.self, Extract.self, Parse.self, Invoice.self, Read.self, Map.self, ParseContacts.self],
         defaultSubcommand: Parse.self
     )
+}
+
+func sanitize(_ path: String) -> String {
+    var sanitizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    
+    // Remove trailing ":" if it exists
+    if sanitizedPath.hasSuffix(":") {
+        sanitizedPath.removeLast()
+    }
+    
+    return sanitizedPath
+}
+
+func script(_ type: Script,_ arguments: Arguments) -> String {
+    switch type {
+        case .open:
+            return """
+            set numbersFilePath to POSIX file "\(arguments.src)" as alias
+
+            tell application "Numbers"
+                activate
+                open numbersFilePath
+            end tell
+            """
+        case .debug:
+            return """
+            tell application "Numbers"
+                activate
+                tell document 1
+                    -- Debug: List all sheets
+                    set sheetList to ""
+                    repeat with i from 1 to count of sheets
+                        set sheetList to sheetList & i & ": " & name of sheet i & "\\n"
+                    end repeat
+                    display dialog "Sheets:\\n" & sheetList
+                    
+                    -- Check if the requested sheet exists
+                    if \(arguments.data.sheet) > (count of sheets) then
+                        display dialog "Error: Sheet index \(arguments.data.sheet) is out of bounds."
+                        return
+                    end if
+                    
+                    tell sheet \(arguments.data.sheet)
+                        -- Debug: List all tables in the sheet
+                        set tableList to ""
+                        repeat with i from 1 to count of tables
+                            set tableList to tableList & i & ": " & name of table i & "\\n"
+                        end repeat
+                        display dialog "Tables in Sheet \(arguments.data.sheet):\\n" & tableList
+                        
+                        -- Verify if the requested table exists
+                        set tableExists to false
+                        repeat with i from 1 to count of tables
+                            if name of table i is "\(arguments.data.table)" then
+                                set tableExists to true
+                            end if
+                        end repeat
+                        
+                        if not tableExists then
+                            display dialog "Error: Table '\(arguments.data.table)' not found in sheet \(arguments.data.sheet)."
+                            return
+                        end tell
+                    end tell
+                end tell
+            end tell
+            """
+        case .debugCells:
+            return """
+            tell application "Numbers"
+                activate
+                tell document 1
+                    tell sheet 12 -- Replace with actual sheet index if necessary
+                        tell table "Invoice Selection" -- Replace with actual table name if necessary
+                            set debugMsg to "Debugging Table: Invoice Selection\n"
+
+                            try
+                                set cell1 to value of cell 1 of row 1
+                                set debugMsg to debugMsg & "Row 1, Column 1: " & cell1 & "\n"
+                            on error
+                                set debugMsg to debugMsg & "Row 1, Column 1: ERROR\n"
+                            end try
+
+                            try
+                                set cell2 to value of cell 2 of row 1
+                                set debugMsg to debugMsg & "Row 1, Column 2: " & cell2 & "\n"
+                            on error
+                                set debugMsg to debugMsg & "Row 1, Column 2: ERROR\n"
+                            end try
+
+                            display dialog debugMsg
+                        end tell
+                    end tell
+                end tell
+            end tell
+            """
+        case .setInvoice:
+            return """
+            tell application "Numbers"
+                activate
+                    tell document 1
+                        tell sheet \(arguments.data.sheet)
+                            tell table "\(arguments.data.table)"
+                                set the value of cell \(arguments.data.column) of row \(arguments.data.row) to \(arguments.data.value)
+                            end tell
+                        end tell
+                    end tell
+            end tell
+            """
+        case .exportCSV:
+            return """
+            set exportFilePath to POSIX file "\(arguments.dst)"
+            set exportPDFPath to POSIX file "\(arguments.inv)"
+
+            tell application "Numbers"
+                activate
+
+                tell document 1
+                    export to exportFilePath as CSV
+                end tell
+            end tell
+            """
+        case .exportPDF:
+            return """
+            set exportPDFPath to POSIX file "\(arguments.inv)"
+
+            tell application "Numbers"
+                activate
+
+                tell document 1
+                    export to exportPDFPath as PDF
+                end tell
+            end tell
+            """
+        case .ghostty:
+            return """
+            tell application "Ghostty"
+                activate
+            end tell
+            """
+        case .responder:
+            return """
+            tell application "Responder"
+                activate
+            end tell
+            """
+        case .close:
+            return """
+            tell application "Numbers"
+                activate
+
+                tell document 1
+                    close
+                end tell
+            end tell
+            """
+        case .map:
+            return """
+            tell application "Numbers"
+                activate
+                tell document 1
+                    set result to "Sheet and Table Overview:\n"
+                    repeat with sheetIndex from 1 to count of sheets
+                        set currentSheet to sheet sheetIndex
+                        set sheetName to name of currentSheet
+                        set result to result & "Sheet " & sheetIndex & ": " & sheetName & "\n"
+
+                        repeat with tableIndex from 1 to count of tables of currentSheet
+                            set currentTable to table tableIndex of currentSheet
+                            set tableName to name of currentTable
+                            set result to result & "  Table " & tableIndex & ": " & tableName & "\n"
+                        end repeat
+                    end repeat
+                    display dialog result
+                end tell
+            end tell
+            """
+    }
+}
+
+func removeExistingCSV(_ path: String = environment(Environment.destination.rawValue)) {
+    let fileManager = FileManager.default
+    if fileManager.fileExists(atPath: path) {
+        do {
+            try fileManager.removeItem(atPath: path)
+            print("Deleted existing directory: \(path)")
+        } catch {
+            print("Failed to delete existing directory: \(error)")
+        }
+    }
+}
+
+func runOsascriptProcess(_ script: String) {
+    let process = Process()
+    process.launchPath = "/usr/bin/osascript"
+    process.arguments = ["-e", script]
+    
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        print("Failed to execute AppleScript: \(error)")
+    }
 }
 
 struct Export: ParsableCommand {
@@ -87,193 +293,21 @@ struct Export: ParsableCommand {
     var column: String = environment(Environment.column.rawValue)
 
     @Option(name: .shortAndLong, help: "Value to adjust selected cell to (requires -a, --adjust-before-exporting)")
-    var value: String
+    var value: String = ""
+
+    @Flag(name: .shortAndLong, help: "Return to Responder instead of Ghostty")
+    var responder: Bool = false
 
     func run() {
         print("Converting \(source) → \(destination)")
         let data = NumbersData(sheet: sheet, table: table, row: row, column: column, value: value)
 
-        runAppleScript(source: source, destination: destination, invoice: pdfRaw, adjust: adjustBeforeExporting, data: data, close: close)
+        runAppleScript(source: source, destination: destination, invoice: pdfRaw, adjust: adjustBeforeExporting, data: data, close: close, returnToResponder: responder)
         print("Export complete.")
 
     }
 
-    func sanitize(_ path: String) -> String {
-        var sanitizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Remove trailing ":" if it exists
-        if sanitizedPath.hasSuffix(":") {
-            sanitizedPath.removeLast()
-        }
-        
-        return sanitizedPath
-    }
-
-    func script(_ type: Script,_ arguments: Arguments) -> String {
-        switch type {
-            case .open:
-                return """
-                set numbersFilePath to POSIX file "\(arguments.src)" as alias
-
-                tell application "Numbers"
-                    activate
-                    open numbersFilePath
-                end tell
-                """
-            case .debug:
-                return """
-                tell application "Numbers"
-                    activate
-                    tell document 1
-                        -- Debug: List all sheets
-                        set sheetList to ""
-                        repeat with i from 1 to count of sheets
-                            set sheetList to sheetList & i & ": " & name of sheet i & "\\n"
-                        end repeat
-                        display dialog "Sheets:\\n" & sheetList
-                        
-                        -- Check if the requested sheet exists
-                        if \(arguments.data.sheet) > (count of sheets) then
-                            display dialog "Error: Sheet index \(arguments.data.sheet) is out of bounds."
-                            return
-                        end if
-                        
-                        tell sheet \(arguments.data.sheet)
-                            -- Debug: List all tables in the sheet
-                            set tableList to ""
-                            repeat with i from 1 to count of tables
-                                set tableList to tableList & i & ": " & name of table i & "\\n"
-                            end repeat
-                            display dialog "Tables in Sheet \(arguments.data.sheet):\\n" & tableList
-                            
-                            -- Verify if the requested table exists
-                            set tableExists to false
-                            repeat with i from 1 to count of tables
-                                if name of table i is "\(arguments.data.table)" then
-                                    set tableExists to true
-                                end if
-                            end repeat
-                            
-                            if not tableExists then
-                                display dialog "Error: Table '\(arguments.data.table)' not found in sheet \(arguments.data.sheet)."
-                                return
-                            end tell
-                        end tell
-                    end tell
-                end tell
-                """
-            case .debugCells:
-                return """
-                tell application "Numbers"
-                    activate
-                    tell document 1
-                        tell sheet 12 -- Replace with actual sheet index if necessary
-                            tell table "Invoice Selection" -- Replace with actual table name if necessary
-                                set debugMsg to "Debugging Table: Invoice Selection\n"
-
-                                try
-                                    set cell1 to value of cell 1 of row 1
-                                    set debugMsg to debugMsg & "Row 1, Column 1: " & cell1 & "\n"
-                                on error
-                                    set debugMsg to debugMsg & "Row 1, Column 1: ERROR\n"
-                                end try
-
-                                try
-                                    set cell2 to value of cell 2 of row 1
-                                    set debugMsg to debugMsg & "Row 1, Column 2: " & cell2 & "\n"
-                                on error
-                                    set debugMsg to debugMsg & "Row 1, Column 2: ERROR\n"
-                                end try
-
-                                display dialog debugMsg
-                            end tell
-                        end tell
-                    end tell
-                end tell
-                """
-            case .setInvoice:
-                return """
-                tell application "Numbers"
-                    activate
-                        tell document 1
-                            tell sheet \(arguments.data.sheet)
-                                tell table "\(arguments.data.table)"
-                                    set the value of cell \(arguments.data.column) of row \(arguments.data.row) to \(arguments.data.value)
-                                end tell
-                            end tell
-                        end tell
-                end tell
-                """
-            case .exportCSV:
-                return """
-                set exportFilePath to POSIX file "\(arguments.dst)"
-                set exportPDFPath to POSIX file "\(arguments.inv)"
-
-                tell application "Numbers"
-                    activate
-
-                    tell document 1
-                        export to exportFilePath as CSV
-                    end tell
-                end tell
-                """
-            case .exportPDF:
-                return """
-                set exportPDFPath to POSIX file "\(arguments.inv)"
-
-                tell application "Numbers"
-                    activate
-
-                    tell document 1
-                        export to exportPDFPath as PDF
-                    end tell
-                end tell
-                """
-            case .ghostty:
-                return """
-                tell application "Ghostty"
-                    activate
-                end tell
-                """
-            case .close:
-                return """
-                tell application "Numbers"
-                    activate
-
-                    tell document 1
-                        close
-                    end tell
-                end tell
-                """
-        }
-    }
-
-    func removeExistingCSV(_ path: String = environment(Environment.destination.rawValue)) {
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: path) {
-            do {
-                try fileManager.removeItem(atPath: path)
-                print("Deleted existing directory: \(path)")
-            } catch {
-                print("Failed to delete existing directory: \(error)")
-            }
-        }
-    }
-
-    func runOsascriptProcess(_ script: String) {
-        let process = Process()
-        process.launchPath = "/usr/bin/osascript"
-        process.arguments = ["-e", script]
-        
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            print("Failed to execute AppleScript: \(error)")
-        }
-    }
-
-    func runAppleScript(source: String, destination: String, invoice: String, adjust: Bool, data: NumbersData, close: Bool) {
+    func runAppleScript(source: String, destination: String, invoice: String, adjust: Bool, data: NumbersData, close: Bool, returnToResponder: Bool) {
         let src = sanitize(source)
         let dst = sanitize(destination)
         let inv = sanitize(invoice)
@@ -288,6 +322,7 @@ struct Export: ParsableCommand {
         let pdf = script(.exportPDF, args)
         let closeOp = script(.close, args)
         let ghostty = script(.ghostty, args)
+        let responder = script(.responder, args)
 
         runOsascriptProcess(open)
         if adjust {
@@ -312,9 +347,44 @@ struct Export: ParsableCommand {
         removeExistingCSV()
         runOsascriptProcess(csv)
         runOsascriptProcess(pdf)
-        runOsascriptProcess(ghostty)
+        if returnToResponder {
+            runOsascriptProcess(responder)
+        } else {
+            runOsascriptProcess(ghostty)
+        }
         if close {
             runOsascriptProcess(closeOp)
+        }
+    }
+}
+
+struct Map: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "map",
+        abstract: "List all sheets and their tables"
+    )
+
+    @Option(name: .shortAndLong, help: "Path to the .numbers source file")
+    var source: String = environment(Environment.source.rawValue)
+
+    func run() {
+        let sanitizedSource = sanitize(source)
+        let actor = NumbersActor()
+
+        let vars = AppleScriptVariables(filePath: source)
+
+        print("Activating Numbers and mapping sheets/tables...")
+
+        _ = actor.activate()
+        _ = actor.openDocument(filePath: sanitizedSource)
+
+        let result = actor.mapSheetsAndTables(vars)
+
+        switch result {
+        case .success:
+            print("Map script executed successfully.")
+        case .failure(let error):
+            print("Failed to map sheets/tables: \(error)")
         }
     }
 }
@@ -473,6 +543,28 @@ struct Extract: ParsableCommand {
             print("Failed to save structured JSON: \(error)")
         }
     }
+
+    func extractContactsTable() {
+        print("Extracting Contacts table from CSV: \(csvPath)")
+
+        guard let sheetData = parseRawCSV(filePath: csvPath) else {
+            print("Failed to parse \(csvPath)")
+            return
+        }
+
+        // You can adapt this filter if you only want to include rows that contain e.g., a name or email
+        let filteredData = sheetData.filter { !$0.isEmpty }
+
+        let contactsOutputPath = reparsedJsonPath.replacingOccurrences(of: ".json", with: "-contacts.json")
+        
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: filteredData, options: .prettyPrinted)
+            try jsonData.write(to: URL(fileURLWithPath: contactsOutputPath))
+            print("Extracted contacts saved to \(contactsOutputPath)")
+        } catch {
+            print("Failed to save contacts JSON: \(error)")
+        }
+    }
 }
 
 struct Invoice: ParsableCommand {
@@ -559,6 +651,9 @@ struct Parse: ParsableCommand {
     @Option(name: .shortAndLong, help: "Value to adjust selected cell to (requires -a, --adjust-before-exporting)")
     var value: String
 
+    @Flag(name: .shortAndLong, help: "Return to Responder instead of Ghostty")
+    var responder: Bool = false
+
     func run() {
         do {
             print("Running Export...")
@@ -573,6 +668,13 @@ struct Parse: ParsableCommand {
                 exportArgs.append(contentsOf: ["--column", column]) 
                 exportArgs.append(contentsOf: ["--value", value]) 
             }
+
+            if responder {
+                exportArgs.append("--responder")
+            }
+
+            print("Export args:")
+            print(exportArgs)
 
             var export = try Export.parseAsRoot(exportArgs)
             try export.run()
@@ -610,6 +712,52 @@ struct Read: ParsableCommand {
             }
         } catch {
             print("Error reading JSON file: \(error)")
+        }
+    }
+}
+
+struct ParseContacts: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "parse-contacts",
+        abstract: "Exports and then parses the 'contacts' table from Sheet 7 into JSON"
+    )
+
+    func run() throws {
+        var export = try Export.parseAsRoot([])
+        try export.run()
+
+        let basePath = environment(Environment.destination.rawValue)
+        let contactsCSV = basePath + "/Contacts-contacts.csv"
+    
+        // output
+        let contactsJSONPath = environment(Environment.contacts.rawValue)
+
+        json(contactsCSV, contactsJSONPath)
+    }
+
+    func json(_ input: String, _ output: String) {
+        do {
+            let csvContent = try String(contentsOfFile: input, encoding: .utf8)
+            let lines = csvContent.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+
+            guard let headerLine = lines.first else {
+                print("No header found in CSV.")
+                return
+            }
+
+            let headers = headerLine.components(separatedBy: ";").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let dataRows = lines.dropFirst()
+
+            let rows: [[String: String]] = dataRows.map { line in
+                let values = line.components(separatedBy: ";").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                return Dictionary(uniqueKeysWithValues: zip(headers, values))
+            }
+
+            let jsonData = try JSONSerialization.data(withJSONObject: rows, options: .prettyPrinted)
+            try jsonData.write(to: URL(fileURLWithPath: output))
+            print("Contacts JSON written to \(output)")
+        } catch {
+            print("Failed to parse contacts CSV: \(error)")
         }
     }
 }

@@ -5,11 +5,14 @@ import PackageDescription
 
 let package = Package(
     name: "numbers-parser",
+    platforms: [
+        .macOS(.v13)
+    ],
     dependencies: [
         // .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.29.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.2.0"),
-        .package(url: "https://github.com/leviouwendijk/plate.git", from: "1.0.2"),
-        .package(url: "https://github.com/leviouwendijk/MacActor.git", from: "0.1.0")
+        .package(url: "https://github.com/leviouwendijk/plate.git", branch: "master"),
+        .package(url: "https://github.com/leviouwendijk/MacActor.git", branch: "master")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

@@ -246,6 +246,7 @@ func removeExistingCSV(_ path: String = environment(Environment.destination.rawV
     }
 }
 
+// will become plate public func
 func runOsascriptProcess(_ script: String) {
     let process = Process()
     process.launchPath = "/usr/bin/osascript"

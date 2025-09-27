@@ -1,0 +1,19 @@
+uuid = "554E3D96-D098-4313-97B2-24CF4D877B94"
+name = "numbers-parser"
+types {
+    "binary"
+}
+versions {
+    release {
+        major = 0
+        minor = 1
+        patch = 0
+    }
+}
+compile {
+    use = false
+    arguments {  }
+}
+details = "util to extract numbers-parser"
+author = "Levi Ouwendijk"
+update = "https://raw.githubusercontent.com/leviouwendijk/numbers-parser/master/build-object.pkl"
